@@ -15,6 +15,7 @@ except ImportError:
 
 from psshlib.askpass_server import PasswordServer
 from psshlib import psshutil
+from psshlib.callbacks import DefaultCallbacks
 
 READ_SIZE = 1 << 16
 
@@ -34,13 +35,14 @@ class Manager(object):
         limit: Maximum number of commands running at once.
         timeout: Maximum allowed execution time in seconds.
     """
-    def __init__(self, opts):
+    def __init__(self, opts, callbacks=DefaultCallbacks()):
         self.limit = opts.par
         self.timeout = opts.timeout
         self.askpass = opts.askpass
         self.outdir = opts.outdir
         self.errdir = opts.errdir
         self.iomap = make_iomap()
+        self.callbacks = callbacks
 
         self.taskcount = 0
         self.tasks = []
@@ -91,8 +93,7 @@ class Manager(object):
             writer.signal_quit()
             writer.join()
 
-        statuses = [task.exitstatus for task in self.save_tasks if task in self.done]
-        return statuses
+        return self.callbacks.result(self)
 
     def clear_sigchld_handler(self):
         signal.signal(signal.SIGCHLD, signal.SIG_DFL)
@@ -195,10 +196,10 @@ class Manager(object):
             self.finished(task)
 
     def finished(self, task):
-        """Marks a task as complete and reports its status to stdout."""
+        """Marks a task as complete and reports its status as finished."""
         self.done.append(task)
         n = len(self.done)
-        task.report(n)
+        self.callbacks.finished(task, n)
 
 
 class IOMap(object):
