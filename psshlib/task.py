@@ -1,4 +1,5 @@
 # Copyright (c) 2009-2012, Andrew McNabb
+# Copyright (c) 2013, Kristoffer Gronlund
 
 from errno import EINTR
 from subprocess import Popen, PIPE
@@ -24,7 +25,36 @@ class Task(object):
     Upon completion, the `exitstatus` attribute is set to the exit status
     of the process.
     """
-    def __init__(self, host, port, user, cmd, opts, stdin=None):
+    def __init__(self,
+                 host,
+                 port,
+                 user,
+                 cmd,
+                 verbose=False,
+                 quiet=False,
+                 stdin=None,
+                 print_out=False,
+                 inline=False,
+                 inline_stdout=False):
+
+        # Backwards compatibility:
+        if not isinstance(verbose, bool):
+            opts = verbose
+            verbose = opts.verbose
+            quiet = opts.quiet
+            try:
+                print_out = bool(opts.print_out)
+            except AttributeError:
+                print_out = False
+            try:
+                inline = bool(opts.inline)
+            except AttributeError:
+                inline = False
+            try:
+                inline_stdout = bool(opts.inline_stdout)
+            except AttributeError:
+                inline_stdout = False
+
         self.exitstatus = None
 
         self.host = host
@@ -32,7 +62,7 @@ class Task(object):
         self.port = port
         self.cmd = cmd
 
-        if user != opts.user:
+        if user:
             self.pretty_host = '@'.join((user, self.pretty_host))
         if port:
             self.pretty_host = ':'.join((self.pretty_host, port))
@@ -54,20 +84,11 @@ class Task(object):
         self.errfile = None
 
         # Set options.
-        self.verbose = opts.verbose
-        self.quiet = opts.quiet
-        try:
-            self.print_out = bool(opts.print_out)
-        except AttributeError:
-            self.print_out = False
-        try:
-            self.inline = bool(opts.inline)
-        except AttributeError:
-            self.inline = False
-        try:
-            self.inline_stdout = bool(opts.inline_stdout)
-        except AttributeError:
-            self.inline_stdout = False
+        self.verbose = verbose
+        self.quiet = quiet
+        self.print_out = print_out
+        self.inline = inline
+        self.inline_stdout = inline_stdout
 
     def start(self, nodenum, iomap, writer, askpass_socket=None):
         """Starts the process and registers files with the IOMap."""

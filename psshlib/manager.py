@@ -1,4 +1,5 @@
 # Copyright (c) 2009-2012, Andrew McNabb
+# Copyright (c) 2013, Kristoffer Gronlund
 
 from errno import EINTR
 import os
@@ -15,6 +16,7 @@ except ImportError:
 
 from psshlib.askpass_server import PasswordServer
 from psshlib import psshutil
+from psshlib.cli import DEFAULT_PARALLELISM, DEFAULT_TIMEOUT
 from psshlib.callbacks import DefaultCallbacks
 
 READ_SIZE = 1 << 16
@@ -35,12 +37,27 @@ class Manager(object):
         limit: Maximum number of commands running at once.
         timeout: Maximum allowed execution time in seconds.
     """
-    def __init__(self, opts, callbacks=DefaultCallbacks()):
-        self.limit = opts.par
-        self.timeout = opts.timeout
-        self.askpass = opts.askpass
-        self.outdir = opts.outdir
-        self.errdir = opts.errdir
+    def __init__(self,
+                 limit=DEFAULT_PARALLELISM,
+                 timeout=DEFAULT_TIMEOUT,
+                 askpass=False,
+                 outdir=None,
+                 errdir=None,
+                 callbacks=DefaultCallbacks()):
+        # Backwards compatibility with old __init__
+        # format: Only argument is an options dict
+        if not isinstance(limit, int):
+            self.limit = limit.par
+            self.timeout = limit.timeout
+            self.askpass = limit.askpass
+            self.outdir = limit.outdir
+            self.errdir = limit.errdir
+        else:
+            self.limit = limit
+            self.timeout = timeout
+            self.askpass = askpass
+            self.outdir = outdir
+            self.errdir = errdir
         self.iomap = make_iomap()
         self.callbacks = callbacks
 
