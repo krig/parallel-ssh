@@ -35,7 +35,8 @@ class Task(object):
                  stdin=None,
                  print_out=False,
                  inline=False,
-                 inline_stdout=False):
+                 inline_stdout=False,
+                 default_user=None):
 
         # Backwards compatibility:
         if not isinstance(verbose, bool):
@@ -54,6 +55,7 @@ class Task(object):
                 inline_stdout = bool(opts.inline_stdout)
             except AttributeError:
                 inline_stdout = False
+            default_user = opts.user
 
         self.exitstatus = None
 
@@ -62,7 +64,7 @@ class Task(object):
         self.port = port
         self.cmd = cmd
 
-        if user:
+        if user and user != default_user:
             self.pretty_host = '@'.join((user, self.pretty_host))
         if port:
             self.pretty_host = ':'.join((self.pretty_host, port))
