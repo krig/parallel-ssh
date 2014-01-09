@@ -41,6 +41,9 @@ class Error(object):
     def __init__(self, msg):
         self.msg = msg
 
+    def __str__(self):
+        return self.msg
+
 
 class Options(object):
     """
@@ -59,7 +62,9 @@ class Options(object):
     inline = True                # Store stdout and stderr in memory buffers
     inline_stdout = False        # Store stdout in memory buffer
     input_stream = None          # Stream to read stdin from
+    default_user = None          # User to connect as (unless overridden per host)
     recursive = True             # (copy, slurp only) Copy recursively
+    localdir = None              # (slurp only) Local base directory to copy to
 
 
 def _expand_host_port_user(lst):
@@ -67,7 +72,7 @@ def _expand_host_port_user(lst):
     Input: list containing hostnames, (host, port)-tuples or (host, port, user)-tuples.
     Output: list of (host, port, user)-tuples.
     """
-    for v in lst:
+    def expand(v):
         if isinstance(v, basestring):
             return (v, None, None)
         elif len(v) == 1:
@@ -76,6 +81,7 @@ def _expand_host_port_user(lst):
             return (v[0], v[1], None)
         else:
             return v
+    return [expand(x) for x in lst]
 
 
 class _CallOutputBuilder(object):
@@ -142,7 +148,8 @@ def call(hosts, cmdline, opts=Options()):
                  quiet=opts.quiet,
                  print_out=opts.print_out,
                  inline=opts.inline,
-                 inline_stdout=opts.inline_stdout)
+                 inline_stdout=opts.inline_stdout,
+                 default_user=opts.default_user)
         manager.add_task(t)
     try:
         return manager.run()
@@ -151,7 +158,7 @@ def call(hosts, cmdline, opts=Options()):
 
 
 class _CopyOutputBuilder(object):
-    def __init__(self, dst):
+    def __init__(self):
         self.finished_tasks = []
 
     def finished(self, task, n):
@@ -171,16 +178,16 @@ class _CopyOutputBuilder(object):
 
 def _build_copy_cmd(host, port, user, src, dst, opts):
     cmd = ['scp', '-qC']
-    if opts.options:
-        for opt in opts.options:
+    if opts.ssh_options:
+        for opt in opts.ssh_options:
             cmd += ['-o', opt]
     if port:
         cmd += ['-P', port]
     if opts.recursive:
         cmd.append('-r')
-    if opts.extra:
-        cmd.extend(opts.extra)
-    cmd.extend(src)
+    if opts.ssh_extra:
+        cmd.extend(opts.ssh_extra)
+    cmd.append(src)
     if user:
         cmd.append('%s@%s:%s' % (user, host, dst))
     else:
@@ -195,6 +202,7 @@ def copy(hosts, src, dst, opts=Options()):
     src: local path
     dst: remote path
     opts: CopyOptions (optional)
+    Returns {host: (rc, stdout, stdin) | Error}
     """
     if opts.outdir and not os.path.exists(opts.outdir):
         os.makedirs(opts.outdir)
@@ -214,7 +222,8 @@ def copy(hosts, src, dst, opts=Options()):
                  quiet=opts.quiet,
                  print_out=opts.print_out,
                  inline=opts.inline,
-                 inline_stdout=opts.inline_stdout)
+                 inline_stdout=opts.inline_stdout,
+                 default_user=opts.default_user)
         manager.add_task(t)
     try:
         return manager.run()
@@ -223,8 +232,9 @@ def copy(hosts, src, dst, opts=Options()):
 
 
 class _SlurpOutputBuilder(object):
-    def __init__(self):
+    def __init__(self, localdirs):
         self.finished_tasks = []
+        self.localdirs = localdirs
 
     def finished(self, task, n):
         self.finished_tasks.append(task)
@@ -238,33 +248,38 @@ class _SlurpOutputBuilder(object):
                 # TODO: save name of output file in Task
                 ret[task.host] = (task.exitstatus,
                                   task.outputbuffer or manager.outdir,
-                                  task.errorbuffer or manager.errdir)
+                                  task.errorbuffer or manager.errdir,
+                                  self.localdirs.get(task.host, None)
+)
         return ret
 
 
 def _slurp_make_local_dirs(hosts, dst, opts):
-    if not os.path.exists(dst):
-        os.makedirs(dst)
+    if opts.localdir and not os.path.exists(opts.localdir):
+        os.makedirs(opts.localdir)
+    localdirs = {}
     for host, port, user in _expand_host_port_user(hosts):
         if opts.localdir:
-            dirname = "%s/%s" % (opts.localdir, host)
+            dirname = os.path.join(opts.localdir, host)
         else:
             dirname = host
         if not os.path.exists(dirname):
             os.mkdir(dirname)
+        localdirs[host] = os.path.join(dirname, dst)
+    return localdirs
 
 
 def _build_slurp_cmd(host, port, user, src, dst, opts):
     cmd = ['scp', '-qC']
-    if opts.options:
-        for opt in opts.options:
+    if opts.ssh_options:
+        for opt in opts.ssh_options:
             cmd += ['-o', opt]
     if port:
         cmd += ['-P', port]
     if opts.recursive:
         cmd.append('-r')
-    if opts.extra:
-        cmd.extend(opts.extra)
+    if opts.ssh_extra:
+        cmd.extend(opts.ssh_extra)
     if user:
         cmd.append('%s@%s:%s' % (user, host, src))
     else:
@@ -280,8 +295,9 @@ def slurp(hosts, src, dst, opts=Options()):
     src: remote path
     dst: local path
     opts: CopyOptions (optional)
+    Returns {host: (rc, stdout, stdin, localpath) | Error}
     """
-    _slurp_make_local_dirs(hosts, dst, opts)
+    localdirs = _slurp_make_local_dirs(hosts, dst, opts)
     if opts.outdir and not os.path.exists(opts.outdir):
         os.makedirs(opts.outdir)
     if opts.errdir and not os.path.exists(opts.errdir):
@@ -291,12 +307,9 @@ def slurp(hosts, src, dst, opts=Options()):
                       askpass=opts.askpass,
                       outdir=opts.outdir,
                       errdir=opts.errdir,
-                      callbacks=_SlurpOutputBuilder())
+                      callbacks=_SlurpOutputBuilder(localdirs))
     for host, port, user in _expand_host_port_user(hosts):
-        if opts.localdir:
-            localpath = "%s/%s/%s" % (opts.localdir, host, dst)
-        else:
-            localpath = "%s/%s" % (host, dst)
+        localpath = localdirs[host]
         cmd = _build_slurp_cmd(host, port, user, src, localpath, opts)
         t = Task(host, port, user, cmd,
                  stdin=opts.input_stream,
@@ -304,7 +317,8 @@ def slurp(hosts, src, dst, opts=Options()):
                  quiet=opts.quiet,
                  print_out=opts.print_out,
                  inline=opts.inline,
-                 inline_stdout=opts.inline_stdout)
+                 inline_stdout=opts.inline_stdout,
+                 default_user=opts.default_user)
         manager.add_task(t)
     try:
         return manager.run()
