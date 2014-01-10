@@ -54,7 +54,7 @@ def parse_args():
     if len(args) == 0 and not opts.send_input:
         parser.error('Command not specified.')
 
-    if not opts.host_files and not opts.host_strings:
+    if not opts.host_files and not opts.host_strings and not opts.pcmk_nodes:
         parser.error('Hosts not specified.')
 
     return opts, args
@@ -112,6 +112,10 @@ if __name__ == "__main__":
         _, e, _ = sys.exc_info()
         sys.stderr.write('Could not open hosts file: %s\n' % e.strerror)
         sys.exit(1)
+    if opts.pcmk_nodes:
+		hosts = psshutil.get_pcmk_nodes()
+		if not hosts:
+			sys.exit(1)
     if opts.host_strings:
         for s in opts.host_strings:
             hosts.extend(psshutil.parse_host_string(s, default_user=opts.user))
