@@ -264,7 +264,7 @@ def _slurp_make_local_dirs(hosts, dst, opts):
         else:
             dirname = host
         if not os.path.exists(dirname):
-            os.mkdir(dirname)
+            os.makedirs(dirname)
         localdirs[host] = os.path.join(dirname, dst)
     return localdirs
 
